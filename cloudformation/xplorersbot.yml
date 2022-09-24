@@ -1,0 +1,94 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: Xplorers Bot
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  StageName:
+    Description: HTTP API Stage name
+    Type: String
+  SlackOauthTokenSsmPath:
+    Description: Ssm path containing slack oauth token
+    Type: String
+  SentryDsnSsmPath:
+    Description: Ssm path containing sentry dsn
+    Type: String
+  Environment:
+    Description: XplorersBot Environment (dev/test/prod)
+    Type: String
+
+Resources:
+  XplorersBotGo:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../lambda.zip
+      Handler: xplorersbot
+      Runtime: go1.x
+      MemorySize: 128
+      Timeout: 30
+      Environment:
+        Variables:
+          SLACK_OAUTH_TOKEN_SSM_PATH: !Ref SlackOauthTokenSsmPath
+          SENTRY_DSN_SSM_PATH: !Ref SentryDsnSsmPath
+          ENVIRONMENT: !Ref Environment
+      Events:
+        CallXplorersBotFunction:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref XplorersBotHttpApi
+            Method: POST
+            Path: /
+            TimeoutInMillis: 15000
+            RouteSettings:
+              ThrottlingBurstLimit: 10
+      Policies:
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SlackOauthTokenSsmPath}
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SentryDsnSsmPath}
+
+  XplorersBotEventInvokeConfig:
+    Type: AWS::Lambda::EventInvokeConfig
+    Properties:
+      FunctionName: !Ref XplorersBotGo
+      Qualifier: $LATEST
+      MaximumRetryAttempts: 0
+      MaximumEventAgeInSeconds: 60
+
+  XplorersBotLambdaFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Join ["", ["/aws/lambda/", !Ref XplorersBotGo]]
+      RetentionInDays: 3
+
+  XplorersBotHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref StageName
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 10
+        ThrottlingRateLimit: 10
+      RouteSettings:
+        "POST /":
+          ThrottlingBurstLimit: 10 # overridden in HttpApi Event
+          DetailedMetricsEnabled: True
+      FailOnWarnings: True
+      CorsConfiguration:
+        AllowMethods:
+          - POST
+        AllowOrigins:
+          - "https://api.slack.com/robots"
+
+Outputs:
+  HttpApiUrl:
+    Description: URL of the API endpoint - This URL is invoked by Slack
+    Value: !Sub https://${XplorersBotHttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${StageName}/
+
+  HttpApiId:
+    Description: Api id of HttpApi
+    Value:
+      Ref: XplorersBotHttpApi
