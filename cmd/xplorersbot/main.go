@@ -15,6 +15,64 @@ import (
 	"github.com/xplorer-io/xplorers-bot-go/internal/xplorersbot"
 )
 
+func ProcessSlackCallbackEvent(innerEvent slackevents.EventsAPIInnerEvent, apiClient *slack.Client) {
+	switch ev := innerEvent.Data.(type) {
+
+	case *slackevents.MessageEvent:
+		if ev.SubType == "channel_join" {
+			fmt.Printf("%s just joined channel %s", ev.User, ev.Channel)
+			welcomeMessage := xplorersbot.GetWelcomeMessageBlock(ev.User)
+			_, _, postSlackMessageErr := apiClient.PostMessage(ev.Channel, slack.MsgOptionBlocks(welcomeMessage...))
+			if postSlackMessageErr != nil {
+				fmt.Printf("Unable to welcome new user %s with error: %s", ev.User, postSlackMessageErr)
+				sentry.CaptureException(postSlackMessageErr)
+			}
+		}
+
+		emojisToAdd := xplorersbot.GetEmojis(ev.Text)
+		if len(emojisToAdd) > 0 {
+			fmt.Println("Reacting to slack post with emojis: ", emojisToAdd)
+			for _, emoji := range emojisToAdd {
+				addReactionErr := apiClient.AddReaction(emoji, slack.NewRefToMessage(ev.Channel, ev.EventTimeStamp))
+				if addReactionErr != nil {
+					fmt.Printf("Unable to add emoji reaction `%s` to the slack post", emoji)
+					sentry.CaptureException(addReactionErr)
+				}
+			}
+		}
+
+	case *slackevents.AppMentionEvent:
+		helloMessage := fmt.Sprintf("Hello <@%s> :wave: what can I do for you today?", ev.User)
+		_, _, postSlackMessageErr := apiClient.PostMessage(ev.Channel, slack.MsgOptionText(helloMessage, false))
+		if postSlackMessageErr != nil {
+			fmt.Printf("Unable to respond to user %s who mentioned me: %s ", ev.User, postSlackMessageErr)
+			sentry.CaptureException(postSlackMessageErr)
+		}
+	}
+}
+
+func ProcessSlackEvent(request events.APIGatewayProxyRequest, eventsAPIEvent slackevents.EventsAPIEvent, apiClient *slack.Client) (events.APIGatewayProxyResponse, error) {
+	switch eventsAPIEvent.Type {
+
+	case slackevents.URLVerification:
+		var r *slackevents.ChallengeResponse
+		jsonUnmarshalErr := json.Unmarshal([]byte(request.Body), &r)
+		if jsonUnmarshalErr != nil {
+			fmt.Println("Unable to unmarshal slack url verification event.")
+			sentry.CaptureException(jsonUnmarshalErr)
+		}
+		fmt.Println("URL verification event, responding with the challenge.")
+		return events.APIGatewayProxyResponse{Body: r.Challenge, StatusCode: 200}, nil
+
+	case slackevents.CallbackEvent:
+		innerEvent := eventsAPIEvent.InnerEvent
+		ProcessSlackCallbackEvent(innerEvent, apiClient)
+	}
+
+	// Ignore any events that dont match our rules
+	return events.APIGatewayProxyResponse{Body: "Successfully processed slack event", StatusCode: 200}, nil
+}
+
 func ProcessSlackRequest(request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
 	sentryDsnParameterPath := os.Getenv("SENTRY_DSN_SSM_PATH")
 	sentryDsn, getParamErr := xplorersbot.GetSsmParameter(&sentryDsnParameterPath)
@@ -60,58 +118,7 @@ func ProcessSlackRequest(request events.APIGatewayProxyRequest) (events.APIGatew
 		return events.APIGatewayProxyResponse{Body: "Bad request body!", StatusCode: 400}, nil
 	}
 
-	switch eventsAPIEvent.Type {
-
-	case slackevents.URLVerification:
-		var r *slackevents.ChallengeResponse
-		jsonUnmarshalErr := json.Unmarshal([]byte(request.Body), &r)
-		if jsonUnmarshalErr != nil {
-			fmt.Println("Unable to unmarshal slack url verification event.")
-			sentry.CaptureException(jsonUnmarshalErr)
-		}
-		fmt.Println("URL verification event, responding with the challenge.")
-		return events.APIGatewayProxyResponse{Body: r.Challenge, StatusCode: 200}, nil
-
-	case slackevents.CallbackEvent:
-		innerEvent := eventsAPIEvent.InnerEvent
-
-		switch ev := innerEvent.Data.(type) {
-
-		case *slackevents.MessageEvent:
-			if ev.SubType == "channel_join" {
-				fmt.Printf("%s just joined channel %s", ev.User, ev.Channel)
-				welcomeMessage := xplorersbot.GetWelcomeMessageBlock(ev.User)
-				_, _, postSlackMessageErr := apiClient.PostMessage(ev.Channel, slack.MsgOptionBlocks(welcomeMessage...))
-				if postSlackMessageErr != nil {
-					fmt.Printf("Unable to welcome new user %s with error: %s", ev.User, postSlackMessageErr)
-					sentry.CaptureException(postSlackMessageErr)
-				}
-			}
-
-			emojisToAdd := xplorersbot.GetEmojis(ev.Text)
-			if len(emojisToAdd) > 0 {
-				fmt.Println("Reacting to slack post with emojis: ", emojisToAdd)
-				for _, emoji := range emojisToAdd {
-					addReactionErr := apiClient.AddReaction(emoji, slack.NewRefToMessage(ev.Channel, ev.EventTimeStamp))
-					if addReactionErr != nil {
-						fmt.Printf("Unable to add emoji reaction `%s` to the slack post", emoji)
-						sentry.CaptureException(addReactionErr)
-					}
-				}
-			}
-
-		case *slackevents.AppMentionEvent:
-			helloMessage := fmt.Sprintf("Hello <@%s> :wave: what can I do for you today?", ev.User)
-			_, _, postSlackMessageErr := apiClient.PostMessage(ev.Channel, slack.MsgOptionText(helloMessage, false))
-			if postSlackMessageErr != nil {
-				fmt.Printf("Unable to respond to user %s who mentioned me: %s ", ev.User, postSlackMessageErr)
-				sentry.CaptureException(postSlackMessageErr)
-			}
-		}
-	}
-
-	// Ignore any events that dont match our rules
-	return events.APIGatewayProxyResponse{Body: "Successfully processed slack event", StatusCode: 200}, nil
+	return ProcessSlackEvent(request, eventsAPIEvent, apiClient)
 }
 
 func main() {
