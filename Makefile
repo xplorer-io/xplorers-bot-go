@@ -3,8 +3,9 @@ SHELLFLAGS = -ex
 
 VERSION ?= $(shell git rev-parse --short HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
-API_STAGE ?= dev
-ENVIRONMENT ?= dev
+API_STAGE ?= Prod
+ENVIRONMENT ?= prod
+SLACK_OAUTH_TOKEN_SSM_PATH ?= /xplorers/slack/bot/${GIT_BRANCH}/oauth/token
 
 # Import settings and stage-specific overrides
 include ./settings/defaults.conf
@@ -23,6 +24,9 @@ lint: download-golangci-lint ## run golang linter
 	@echo "--- running golang linter ---"
 	@bin/golangci-lint run
 
+update-dependencies: ## update all dependencies
+	@go get -t -u ./...
+
 lint-fix: ## run golang linter with fix option
 	@echo "--- running golang linter with fix option ---"
 	@bin/golangci-lint run --fix
@@ -33,6 +37,7 @@ build: ## build go binary
 	# the -w -s flags make the binary a bit smaller and
 	# trimpath shortens build paths in stack traces
 	@GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -a -ldflags='-w -s' -trimpath -o dist/xplorersbot ./cmd/xplorersbot
+	@GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -a -ldflags='-w -s' -trimpath -o dist/xplorersChatBot ./cmd/xplorersChatBot
 
 test: ## run go tests and generate coverage
 	@echo "--- running go tests ---"
@@ -62,14 +67,16 @@ deploy-xplorers-bot: cleanup zip-artifact ## deploy xplorers bot to aws
 		--s3-bucket $(S3_BUCKET) \
 		--s3-prefix xplorersbot/$(GIT_BRANCH)/$(VERSION) \
 		--template-file xplorersbot.packaged.yml \
-		--stack-name xplorersbot-$(GIT_BRANCH)-deploy \
+		--stack-name xplorersbot-$(GIT_BRANCH) \
 		--capabilities CAPABILITY_NAMED_IAM \
 		--no-fail-on-empty-changeset \
 		--parameter-overrides \
 			StageName=$(API_STAGE) \
 			SlackOauthTokenSsmPath=$(SLACK_OAUTH_TOKEN_SSM_PATH) \
 			SentryDsnSsmPath=$(SENTRY_DSN_SSM_PATH) \
+			ChatgptApiKeySsmPath=$(CHATGPT_API_KEY_SSM_PATH) \
 			Environment=$(ENVIRONMENT) \
+			XplorersChatbotSlackChannelIdSsmPath=$(XPLORERS_CHATBOT_SLACK_CHANNEL_ID_SSM_PATH) \
 		--tags xplorersbot:version=$(VERSION) xplorersbot:branch=$(GIT_BRANCH)
 	@make cleanup
 

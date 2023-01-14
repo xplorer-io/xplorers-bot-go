@@ -1,0 +1,58 @@
+---
+openapi: 3.0.3
+info:
+  title: Xplorers API
+  version: 0.0.1
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+paths:
+  /:
+    post:
+      responses:
+          200:
+            description: 200 response
+            content:
+              application/json:
+                schema:
+                  $ref: "#/components/schemas/Empty"
+      x-amazon-apigateway-integration:
+        type: aws_proxy
+        httpMethod: POST
+        responses:
+          default:
+            description: XplorersBot Response
+            statusCode: 200
+        passthroughBehavior : when_no_templates
+        contentHandling : CONVERT_TO_TEXT
+        uri:
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${XplorersBotGo}/invocations
+  /chat:
+    post:
+      responses:
+          200:
+            description: 200 response
+            content:
+              application/json:
+                schema:
+                  $ref: "#/components/schemas/Empty"
+      x-amazon-apigateway-integration:
+        httpMethod: POST
+        responses:
+          default:
+            description: Xplorers ChatBot Response
+            statusCode: 200
+        requestParameters:
+          integration.request.header.X-Amz-Invocation-Type : "'Event'"
+        requestTemplates:
+          application/x-www-form-urlencoded: "{\"body\" : $input.json(\"$\")}"
+        type: aws
+        passthroughBehavior : when_no_templates
+        contentHandling : CONVERT_TO_TEXT
+        uri:
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${XplorersChatBot}/invocations
+components:
+  schemas:
+    Empty:
+      title: Empty Schema
+      type: object

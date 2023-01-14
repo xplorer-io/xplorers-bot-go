@@ -16,31 +16,61 @@ Parameters:
   Environment:
     Description: XplorersBot Environment (dev/test/prod)
     Type: String
+  ChatgptApiKeySsmPath:
+    Description: Ssm path containing chat gpt api key
+    Type: String
+  XplorersChatbotSlackChannelIdSsmPath:
+    Description: Ssm path containing ID of slack channel where Xplorers interact with the chatbot
+    Type: String
+
+Mappings:
+  AwsRegionToLayerArnMap:
+    ap-southeast-2:
+      # AWS Managed lambda layer
+      # https://docs.aws.amazon.com/systems-manager/latest/userguide/ps-integration-lambda-extensions.html#:~:text=URL%20is%20used.-,AWS%20Parameters%20and%20Secrets%20Lambda%20Extension%20ARNs,-The%20following%20tables
+      LayerArn: arn:aws:lambda:ap-southeast-2:665172237481:layer:AWS-Parameters-and-Secrets-Lambda-Extension:4
+
+Globals:
+  Function:
+    Runtime: go1.x
+    MemorySize: 128
+    Timeout: 30
+    Environment:
+      Variables:
+        SENTRY_DSN_SSM_PATH: !Ref SentryDsnSsmPath
+        ENVIRONMENT: !Ref Environment
+    Layers:
+      - !FindInMap [AwsRegionToLayerArnMap, !Ref AWS::Region, LayerArn]
 
 Resources:
+  XplorersBotServerlessApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Description: API used for all Xplorers' needs
+      StageName: !Ref StageName
+      DefinitionBody:
+        Fn::Transform:
+          Name: AWS::Include
+          Parameters:
+            Location: apispec.yaml
+      EndpointConfiguration:
+          Type: REGIONAL
+
   XplorersBotGo:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: ../lambda.zip
       Handler: xplorersbot
-      Runtime: go1.x
-      MemorySize: 128
-      Timeout: 30
       Environment:
         Variables:
           SLACK_OAUTH_TOKEN_SSM_PATH: !Ref SlackOauthTokenSsmPath
-          SENTRY_DSN_SSM_PATH: !Ref SentryDsnSsmPath
-          ENVIRONMENT: !Ref Environment
       Events:
         CallXplorersBotFunction:
-          Type: HttpApi
+          Type: Api
           Properties:
-            ApiId: !Ref XplorersBotHttpApi
+            RestApiId: !Ref XplorersBotServerlessApi
             Method: POST
             Path: /
-            TimeoutInMillis: 15000
-            RouteSettings:
-              ThrottlingBurstLimit: 10
       Policies:
         - Version: 2012-10-17
           Statement:
@@ -62,33 +92,60 @@ Resources:
   XplorersBotLambdaFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Join ["", ["/aws/lambda/", !Ref XplorersBotGo]]
+      LogGroupName: !Sub /aws/lambda/${XplorersBotGo}
       RetentionInDays: 3
 
-  XplorersBotHttpApi:
-    Type: AWS::Serverless::HttpApi
+  XplorersChatBot:
+    Type: AWS::Serverless::Function
     Properties:
-      StageName: !Ref StageName
-      DefaultRouteSettings:
-        ThrottlingBurstLimit: 10
-        ThrottlingRateLimit: 10
-      RouteSettings:
-        "POST /":
-          ThrottlingBurstLimit: 10 # overridden in HttpApi Event
-          DetailedMetricsEnabled: True
-      FailOnWarnings: True
-      CorsConfiguration:
-        AllowMethods:
-          - POST
-        AllowOrigins:
-          - "https://api.slack.com/robots"
+      CodeUri: ../lambda.zip
+      Handler: xplorersChatBot
+      Environment:
+        Variables:
+          CHATGPT_API_KEY_SSM_PATH: !Ref ChatgptApiKeySsmPath
+          XPLORERS_CHATBOT_SLACK_CHANNEL_ID_SSM_PATH: !Ref XplorersChatbotSlackChannelIdSsmPath
+      Policies:
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SentryDsnSsmPath}
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ChatgptApiKeySsmPath}
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${XplorersChatbotSlackChannelIdSsmPath}
+      Events:
+        InvokeXplorersChatBot:
+          Type: Api
+          Properties:
+            RestApiId: !Ref XplorersBotServerlessApi
+            Method: POST
+            Path: /chat
+
+  XplorersChatBotEventInvokeConfig:
+    Type: AWS::Lambda::EventInvokeConfig
+    Properties:
+      FunctionName: !Ref XplorersChatBot
+      Qualifier: $LATEST
+      MaximumRetryAttempts: 0
+      MaximumEventAgeInSeconds: 60
+
+  XplorersChatBotLambdaFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${XplorersChatBot}
+      RetentionInDays: 3
 
 Outputs:
-  HttpApiUrl:
-    Description: URL of the API endpoint - This URL is invoked by Slack
-    Value: !Sub https://${XplorersBotHttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${StageName}/
+  XplorersBotServerlessApiUrl:
+    Description: URL of Xplorers Bot API endpoint - This URL is invoked by Slack
+    Value: !Sub https://${XplorersBotServerlessApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${StageName}/
 
-  HttpApiId:
-    Description: Api id of HttpApi
+  XplorersChatBotServerlessApiUrl:
+    Description: URL of Xplorers Chat Bot API endpoint - This URL is invoked by Slack
+    Value: !Sub https://${XplorersBotServerlessApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${StageName}/chat/
+
+  XplorersBotServerlessApiId:
+    Description: Api id of ServerlessApi
     Value:
-      Ref: XplorersBotHttpApi
+      Ref: XplorersBotServerlessApi
