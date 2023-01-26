@@ -1,7 +1,9 @@
-package xplorersbot
+package slack
 
 import (
 	"strings"
+
+	"github.com/xplorer-io/xplorers-bot-go/internal/common"
 )
 
 var GetKeyWordsMap = func() (keywordsMap map[string][]string) {
@@ -23,10 +25,11 @@ var GetKeyWordsMap = func() (keywordsMap map[string][]string) {
 		"security":   {"secure", "security", "threat", "hacking", "hacker", "hackers", "enterprise security", "threat vector"},
 		"youtube":    {"youtube"},
 		"linkedin":   {"linkedin"},
+		"typescript": {"typescript"},
 	}
 }
 
-func GetEmojis(text string) (emojis []string) {
+func GetEmojisToReactWith(text string) (emojis []string) {
 	for emoji, keywords := range GetKeyWordsMap() {
 		emojis = GetEmojiMatches(emoji, keywords, text, emojis)
 	}
@@ -35,7 +38,7 @@ func GetEmojis(text string) (emojis []string) {
 
 var GetEmojiMatches = func(emoji string, keywords []string, text string, emojis []string) []string {
 	for _, keyword := range keywords {
-		if strings.Contains(strings.ToLower(text), strings.ToLower(keyword)) && !ArrayContainsItem(emojis, emoji) {
+		if strings.Contains(strings.ToLower(text), strings.ToLower(keyword)) && !common.ArrayContainsItem(emojis, emoji) {
 			emojis = append(emojis, emoji)
 		}
 	}

@@ -1,4 +1,4 @@
-package xplorersbot
+package slack
 
 import (
 	"testing"
@@ -63,7 +63,7 @@ func TestGetEmojis(t *testing.T) {
 	oriGetEmojiMatches := GetEmojiMatches
 	for _, test_case := range tests {
 		t.Run(test_case.name, func(t *testing.T) {
-			result := GetEmojis(test_case.text)
+			result := GetEmojisToReactWith(test_case.text)
 			assert.Equal(test_case.expected, result)
 		})
 	}

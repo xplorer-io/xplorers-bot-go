@@ -1,4 +1,4 @@
-package xplorersbot
+package common
 
 import (
 	"testing"

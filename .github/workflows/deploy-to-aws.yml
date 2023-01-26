@@ -10,15 +10,18 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ENVIRONMENT: prod
-      API_STAGE: prod
+      API_STAGE: Prod
+    # These permissions are needed to interact
+    # with GitHub's OIDC Token endpoint.
+    permissions:
+      id-token: write
+      contents: read
     steps:
     - name: Configure AWS credentials
-      id: creds
       uses: aws-actions/configure-aws-credentials@v1
       with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: 'ap-southeast-2'
+        role-to-assume: "${{ secrets.AWS_IAM_ROLE_ARN_FOR_GITHUB_ACTIONS }}"
+        aws-region: "${{ secrets.AWS_REGION }}"
 
     - uses: webfactory/ssh-agent@v0.5.4
       with:
