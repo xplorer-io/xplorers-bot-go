@@ -26,6 +26,7 @@ var GetKeyWordsMap = func() (keywordsMap map[string][]string) {
 		"youtube":    {"youtube"},
 		"linkedin":   {"linkedin"},
 		"typescript": {"typescript"},
+		"google":     {"google"},
 	}
 }
 
